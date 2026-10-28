@@ -6,8 +6,8 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 > **🚀 Antigravity Production Edition Highlights**:
 > - **Full Tiered Thinking Routing**: Full support for `gemini-4-argon` (low/medium/high/thinking) and `gemini-3.8-flash` (low/medium/high/tiered).
 > - **Thought Capture Hack**: Solves upstream `v1internal` thinking chain stripping via `oauth-excluded-models` + `oauth-model-alias` rerouting.
-> - **Strict Thinking Budget Staging**: Injects critical thresholds (Argon $\ge 16384$, Flash $1000-16000$) using first-write-wins priority rules.
-> - **Zero-Disconnect Enterprise Deployment**: SSE heartbeat (`streaming.keepalive-seconds: 15`), Nginx 600s proxy timeout, systemd service templates, and multi-credential model isolation.
+> - **Strict Thinking Budget Staging**: Injects critical thresholds (Argon $\ge 16384$, Flash $1000-16000$) using first-write-wins priority rules (bare `gemini-3.8-flash` defaults to 4000 budget for 4~10s fast turnarounds).
+> - **Zero-Disconnect & Cloudflare 524 Fix**: Pre-first-token SSE heartbeats (`streaming.send-keepalive-before-ft: true` resetting Cloudflare 120s timeouts), connection pool lifecycle management, Nginx 600s proxy timeout, systemd service templates, and multi-credential model isolation.
 > - See [ANTIGRAVITY_OPTIMIZATION_GUIDE.md](ANTIGRAVITY_OPTIMIZATION_GUIDE.md) and [config.production.example.yaml](config.production.example.yaml) for full details!
 
 If you want to use CLIProxyAPI on your desktop, we recommend our [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) desktop client. It provides a graphical configuration UI, automatic updates, system tray integration, and one-click start/stop for the CLIProxyAPI service.

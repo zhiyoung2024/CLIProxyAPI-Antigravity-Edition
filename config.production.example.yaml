@@ -45,6 +45,19 @@ force-model-prefix: false
 request-retry: 3
 max-retry-interval: 15
 
+# TLS 握手超时限制（秒）：防止上游网络握手挂起阻断工作协程
+tls-handshake-timeout-seconds: 15
+
+# Antigravity 渠道上游连接池与连接生命周期防僵死治理
+antigravity:
+  connection-pool:
+    # 开启连接池复用（避免每请求反复握手，但受控管理连接寿命）
+    enabled: true
+    # 空闲连接超时：设置 20s 及时回收陈旧连接，防止复用到被 Google 边缘网关静默丢弃的半开连接
+    idle-conn-timeout: "20s"
+    # 单凭据每主机最大空闲连接数
+    max-idle-conns-per-host: 4
+
 # 配额与降级处理（当遇到 429 配额用尽时，自动切换到项目凭据或预览模型）
 quota-exceeded:
   switch-project: true
@@ -66,10 +79,13 @@ nonstream-keepalive-interval: 15
 
 # 流式响应 SSE 心跳保活与重试策略
 streaming:
-  # 每 15 秒发送一次 SSE 保持注释行（: keep-alive\n\n），防止 Nginx / Cloudflare 默认 60s 超时切断长推理响应
+  # 每 15 秒发送一次 SSE 保持注释行（: keep-alive\n\n），防止 Nginx / Cloudflare 默认 60s/120s 超时切断长推理响应
   keepalive-seconds: 15
   # 首包传输前若网络抖动，自动重试拉取次数
   bootstrap-retries: 2
+  # 【根治 Cloudflare Error 524 关键手术刀】：在首包到达前开启 SSE 心跳并提前向客户端/Cloudflare 提交 HTTP 200 响应头
+  # 在深度推理首包到达前每 15 秒刷出心跳注释行，不断重置 Cloudflare 120s origin_response_timeout 计时器，零断流直通
+  send-keepalive-before-ft: true
 
 # 挂载外部全量模型目录（支持 Antigravity 35+ 模型定义及自定义能力标签）
 models:
@@ -121,19 +137,24 @@ payload:
         generationConfig.thinkingConfig.includeThoughts: true
         generationConfig.thinkingConfig.thinkingBudget: 1000
 
-    # 5) Gemini 3.8 Flash: 中档思考 (Medium) -> 注入 4000
+    # 5) Gemini 3.8 Flash: 中档/默认日常均衡档 (Medium / Bare / 兼容旧别名) -> 注入 4000
+    # 【日常快调与重度推理分离】：裸名 gemini-3.8-flash 默认分配 4000 预算，日常交互 4~10 秒极速响应且完整保留思维链
     - models:
         - name: gemini-3.8-flash-medium
+          protocol: antigravity
+        - name: gemini-3.8-flash
+          protocol: antigravity
+        - name: gemini-3-flash
+          protocol: antigravity
+        - name: gemini-2.5-flash
           protocol: antigravity
       params:
         generationConfig.thinkingConfig.includeThoughts: true
         generationConfig.thinkingConfig.thinkingBudget: 4000
 
-    # 6) Gemini 3.8 Flash: 高档/全速思考 (High / Bare / Tiered) -> 注入 16000
+    # 6) Gemini 3.8 Flash: 高档/满血深度推理档 (High / Tiered) -> 注入 16000
     - models:
         - name: gemini-3.8-flash-high
-          protocol: antigravity
-        - name: gemini-3.8-flash
           protocol: antigravity
         - name: gemini-3.8-flash-tiered
           protocol: antigravity

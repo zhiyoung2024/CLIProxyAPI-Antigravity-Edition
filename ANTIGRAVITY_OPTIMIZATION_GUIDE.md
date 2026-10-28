@@ -80,7 +80,61 @@
 
 ---
 
-## 二、多账号池治理与单账号模型级隔离
+## 二、深度攻坚：Cloudflare Error 524 根因与方案 B 原生调优三把手术刀
+
+在将 CLIProxyAPI 通过 Cloudflare CDN 代理（橙云 Proxy 模式）对外提供标准 HTTPS 接口时，长推理场景下常会偶发 `Error 524: A timeout occurred`。
+
+### 1. Cloudflare Error 524 的本质触发机理
+Cloudflare CDN 代理节点对于源站响应设有严格的安全限制（默认 `origin_response_timeout = 120s`）。
+当客户端向代理发起流式生成请求后：
+- 如果源站在 120 秒内**未向 Cloudflare 发送任何 HTTP 响应头或数据包**，Cloudflare 就会判定源站宕机或无响应，主动切断与客户端的连接并返回 HTML 格式的 524 错误页；
+- 特别是在高思考预算（如 `thinkingBudget: 16000/32768`）下，模型需要先在内存中进行数十秒的长思考，首字时间（TTFB, Time to First Byte）极长，极易突破 120 秒静默红线。
+
+### 2. 方案对比：为什么坚决推荐方案 B 而否定方案 A？
+
+| 方案 | 操作思路 | 核心缺陷 / 安全隐患 | 结论 |
+| :--- | :--- | :--- | :--- |
+| **方案 A** (关闭橙云) | 将 Cloudflare 解析改为 DNS Only (灰云)，绕过 120s 限制 | **高危安全隐患**：VPS 上往往同机部署了翻墙或管理节点（sing-box / VLESS / Hysteria2 等）。一旦关闭 CDN 代理暴露服务器源站真实 IP，不仅会遭致全网端口扫描与攻击，更极易被 GFW 防火墙精准探测并封锁 IP/端口，导致梯子与 API 双双瘫痪！ | ❌ **坚决否定** |
+| **源码暴力截断** | 在 Go 源码中为 `http.Client` 硬编码 60s/120s 强超时 | **削足适履**：Argon 复杂长推理本身就需要充足思考时间，强行设限会直接将原本正常的深度推理任务误杀中断。 | ❌ **不予采纳** |
+| **方案 B** (原生参数调优) | 利用 CLIProxyAPI 原生支持的 `send-keepalive-before-ft` + 连接池治理 + 思考预算分档 | **最佳实践**：无需暴露源站真实 IP，完美保留 Cloudflare DDoS 防护与 CDN 加速；首包前主动推送 SSE 心跳，每 15 秒置零 120s 计时器；日常快调 4~10 秒极速响应，长推理 100% 稳定直通。 | ✅ **最佳原生方案** |
+
+### 3. 方案 B 三把原生手术刀深度实现
+
+#### 刀法一：首包前心跳注入 (`streaming.send-keepalive-before-ft: true`)
+CLIProxyAPI 原生具备首包前心跳能力。开启此项后：
+- 在等待 Google 上游生成首个 Token 的静默等待期内，CLIProxyAPI 会提前向 Cloudflare 提交 HTTP 200 响应头（`Content-Type: text/event-stream`）；
+- 每隔 15 秒主动向数据流刷出 SSE 注释行（`: keep-alive\n\n`）；
+- 每次刷出数据包，Cloudflare 边缘节点的 120s 超时计数器就会被立刻重置！即使模型思考长达 5 分钟，中间链路也绝不超时断连。
+
+```yaml
+streaming:
+  keepalive-seconds: 15
+  bootstrap-retries: 2
+  send-keepalive-before-ft: true # 关键：首包到达前即提交 200 头并持续推送心跳
+```
+
+#### 刀法二：连接池防僵死与生命周期治理 (`antigravity.connection-pool`)
+在无限制的长连接模式下，Google GFE（Google Frontend）网关常常在空闲超时后静默掐断底层 TCP，形成**半开连接（Half-Open TCP）**。如果代理层盲目复用这些失效连接，请求就会在 `http.Client.Timeout = 0` 下无限期挂死。
+- **解法**：启用连接池并设定严格的生命周期：
+  ```yaml
+  tls-handshake-timeout-seconds: 15
+  antigravity:
+    connection-pool:
+      enabled: true
+      idle-conn-timeout: "20s"       # 空闲 20s 自动回收，防止使用半开失效连接
+      max-idle-conns-per-host: 4     # 限制单主机空闲连接数
+  ```
+
+#### 刀法三：解耦思考预算（日常快调与重度推理分离）
+- **痛点**：此前将裸名 `gemini-3.8-flash` 默认塞入 16000 深度预算档，导致简单的日常对话也要强行思考 30~50 秒，加剧了网络挂起概率；
+- **优化**：
+  - 裸名 `gemini-3.8-flash`（及 `gemini-3-flash` / `gemini-2.5-flash`）：统一移入 **4000** 均衡预算档（与 `-medium` 同档）。实测日常出词提速至 **4~10 秒**，同时完整保留思考链回显；
+  - 深度任务：显式调用 `gemini-3.8-flash-high` 或 `gemini-3.8-flash-tiered`，独享 **16000** 满血推理预算；
+  - 极速任务：显式调用 `gemini-3.8-flash-low`，享用 **1000** 快速思考预算。
+
+---
+
+## 三、多账号池治理与单账号模型级隔离
 
 在高负载企业部署环境下，管理数十个 Google Antigravity OAuth 账号时，常规轮询经常由于脏文件或个别账号受限导致全池崩溃。
 
@@ -107,7 +161,7 @@
 
 ---
 
-## 三、生产环境快速部署实战
+## 四、生产环境快速部署实战
 
 ### 1. 目录结构规划
 ```text
@@ -140,15 +194,16 @@ sudo systemctl reload nginx
 
 ---
 
-## 四、核心配置对照矩阵
+## 五、核心配置对照矩阵
 
-| 模型名 (Model ID) | 客户端请求体验 | 内部路由映射端点 | 注入思考预算 (Budget) | includeThoughts |
-| :--- | :--- | :--- | :--- | :--- |
-| `gemini-4-argon-low` | 轻度思考 (快速响应) | `gemini-4-argon-high` | `16384` | `true` |
-| `gemini-4-argon-medium` | 中度思考 (平衡型) | `gemini-4-argon-high` | `24576` | `true` |
-| `gemini-4-argon-high` | 满血深度思考 | `gemini-4-argon-high` | `32768` | `true` |
-| `gemini-4-argon` | 默认别名 -> 满血 | `gemini-4-argon-high` | `32768` | `true` |
-| `gemini-3.8-flash-low` | 极速思考 | `gemini-3.8-flash-high` | `1000` | `true` |
-| `gemini-3.8-flash-medium` | 适度思考 | `gemini-3.8-flash-high` | `4000` | `true` |
-| `gemini-3.8-flash-high` | 全速思考 | `gemini-3.8-flash-high` | `16000` | `true` |
-| `gemini-3.8-flash` | 默认别名 -> 全速 | `gemini-3.8-flash-high` | `16000` | `true` |
+| 模型名 (Model ID) | 客户端请求体验 | 内部路由映射端点 | 注入思考预算 (Budget) | includeThoughts | 适用场景 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `gemini-4-argon-low` | 轻度思考 (快速响应) | `gemini-4-argon-high` | `16384` | `true` | 代码快速审查、快速解释 |
+| `gemini-4-argon-medium` | 中度思考 (平衡型) | `gemini-4-argon-high` | `24576` | `true` | 复杂业务重构、算法设计 |
+| `gemini-4-argon-high` | 满血深度思考 | `gemini-4-argon-high` | `32768` | `true` | 全局架构推理、难题攻坚 |
+| `gemini-4-argon` | 默认别名 -> 满血 | `gemini-4-argon-high` | `32768` | `true` | 默认通用调用 |
+| `gemini-3.8-flash-low` | 极速思考 | `gemini-3.8-flash-high` | `1000` | `true` | 简单问答、毫秒级响应 |
+| `gemini-3.8-flash-medium` | 适度思考 | `gemini-3.8-flash-high` | `4000` | `true` | 兼顾速度与逻辑推理 |
+| `gemini-3.8-flash` | **日常均衡 (推荐)** | `gemini-3.8-flash-high` | **`4000`** | `true` | **4~10秒极速日常主力模型** |
+| `gemini-3.8-flash-high` | 全速深度思考 | `gemini-3.8-flash-high` | `16000` | `true` | Flash 体系深度复杂推理 |
+| `gemini-3.8-flash-tiered` | 动态多层推理 | `gemini-3.8-flash-high` | `16000` | `true` | 高难度逻辑多层解析 |

@@ -6,8 +6,8 @@
 > **🚀 Antigravity 专版高可用增强特性说明**：
 > - **全阶梯思考路由支持**：全面支持 `gemini-4-argon`（低档/中档/高档/满血思考）与 `gemini-3.8-flash`（低档/中档/高档/分层思考）。
 > - **思维链回显劫持突破**：通过 `oauth-excluded-models` 屏蔽原生低档物理端点 + `oauth-model-alias` 同名别名导向完整端点，完美解决 Google `v1internal` 上游屏蔽 `thought` 摘要的问题。
-> - **严格分档思维预算注入**：遵循 First-Write-Wins 先匹配原则，为 Argon 注入 $\ge 16384$ 触发门槛，为 Flash 注入 $1000 \sim 16000$ 阶梯预算。
-> - **零断流企业部署套件**：内置 SSE 心跳保活（`streaming.keepalive-seconds: 15`）、Nginx 600s 代理超时配置模板、Systemd 服务托管模板与单凭据模型级隔离配置。
+> - **严格分档思维预算注入**：遵循 First-Write-Wins 先匹配原则，为 Argon 注入 $\ge 16384$ 触发门槛，为 Flash 注入 $1000 \sim 16000$ 阶梯预算（裸名 `gemini-3.8-flash` 默认 4000 预算，日常交互 4~10 秒极速响应）。
+> - **零断流企业部署套件 & Cloudflare 524 根治**：内置首包前 SSE 心跳保活（`streaming.send-keepalive-before-ft: true`，彻底击穿 Cloudflare 120s 超时）、连接池防僵死治理、Nginx 600s 代理超时配置模板、Systemd 服务托管模板与单凭据模型级隔离配置。
 > - 详情请参阅完整复盘架构文档 [ANTIGRAVITY_OPTIMIZATION_GUIDE.md](ANTIGRAVITY_OPTIMIZATION_GUIDE.md) 与 [config.production.example.yaml](config.production.example.yaml)！
 
 如果您想在您的桌面使用 CLIProxyAPI，我们推荐您使用我们的 [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) 桌面客户端，该客户端提供了图形化的配置界面、自动更新、系统托盘集成、一键启动/关闭 CLIProxyAPI 服务等功能。

@@ -261,12 +261,63 @@ requests:
   # Streaming behavior (SSE keep-alives + safe bootstrap retries).
   # streaming:
   #   keepalive-seconds: 15         # Default: 0 (disabled). <= 0 disables keep-alives.
-  #   bootstrap-retries: 1          # Default: 0 (disabled). Retries before first byte is sent.
-  #   send-keepalive-before-ft: false # Default: false. When true and keepalive-seconds > 0, send SSE heartbeats before the first token.
+  #   bootstrap-retries: 2          # Default: 0 (disabled). Retries before first byte is sent.
+  #   send-keepalive-before-ft: true # When true and keepalive-seconds > 0, send SSE heartbeats before first token (prevents Cloudflare Error 524 120s timeout)
 
   # Optional payload configuration
   # payload:
   #   default: # Default rules only set parameters when they are missing in the payload.
+  #     # Antigravity Gemini 4 Argon & 3.8 Flash tiered thinking budget injection:
+  #     # Note: Place specific sub-models (-low / -medium) before bare/high models (first-write-wins).
+  #     # gemini-4-argon requires thinkingBudget >= 16384 on upstream v1internal to output thought contents.
+  #     - models:
+  #         - name: "gemini-4-argon-low"
+  #           protocol: "antigravity"
+  #       params:
+  #         "generationConfig.thinkingConfig.includeThoughts": true
+  #         "generationConfig.thinkingConfig.thinkingBudget": 16384
+  #     - models:
+  #         - name: "gemini-4-argon-medium"
+  #           protocol: "antigravity"
+  #       params:
+  #         "generationConfig.thinkingConfig.includeThoughts": true
+  #         "generationConfig.thinkingConfig.thinkingBudget": 24576
+  #     - models:
+  #         - name: "gemini-4-argon-high"
+  #           protocol: "antigravity"
+  #         - name: "gemini-4-argon"
+  #           protocol: "antigravity"
+  #         - name: "gemini-4-argon-thinking"
+  #           protocol: "antigravity"
+  #       params:
+  #         "generationConfig.thinkingConfig.includeThoughts": true
+  #         "generationConfig.thinkingConfig.thinkingBudget": 32768
+  #     - models:
+  #         - name: "gemini-3.8-flash-low"
+  #           protocol: "antigravity"
+  #       params:
+  #         "generationConfig.thinkingConfig.includeThoughts": true
+  #         "generationConfig.thinkingConfig.thinkingBudget": 1000
+  #     - models:
+  #         - name: "gemini-3.8-flash-medium"
+  #           protocol: "antigravity"
+  #         - name: "gemini-3.8-flash"
+  #           protocol: "antigravity"
+  #         - name: "gemini-3-flash"
+  #           protocol: "antigravity"
+  #         - name: "gemini-2.5-flash"
+  #           protocol: "antigravity"
+  #       params:
+  #         "generationConfig.thinkingConfig.includeThoughts": true
+  #         "generationConfig.thinkingConfig.thinkingBudget": 4000
+  #     - models:
+  #         - name: "gemini-3.8-flash-high"
+  #           protocol: "antigravity"
+  #         - name: "gemini-3.8-flash-tiered"
+  #           protocol: "antigravity"
+  #       params:
+  #         "generationConfig.thinkingConfig.includeThoughts": true
+  #         "generationConfig.thinkingConfig.thinkingBudget": 16000
   #     - models:
   #         - name: "gemini-2.5-pro" # Supports wildcards (e.g., "gemini-*")
   #           protocol: "gemini" # restricts the rule to a specific protocol, options: openai, gemini, claude, codex, antigravity
@@ -1142,9 +1193,9 @@ oauth:
       #   - "API"
       #   - "proxy"
       # connection-pool:              # optional: upstream HTTP connection pool settings
-      #   enabled: false             # whether to enable connection pooling (default: false)
-      #   idle-conn-timeout: "30s"    # idle keep-alive timeout (default: 30s, capped at 210s)
-      #   max-idle-conns-per-host: 2  # max idle connections per host per credential (default: 2)
+      #   enabled: true              # whether to enable connection pooling (set to true for connection reuse)
+      #   idle-conn-timeout: "20s"    # idle keep-alive timeout (20s recommended to recycle before GFE silently drops half-open TCP)
+      #   max-idle-conns-per-host: 4  # max idle connections per host per credential
       # Use credits as a last resort after free-tier Claude quota is exhausted.
       antigravity-credits: true
 
